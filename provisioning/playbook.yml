@@ -3,8 +3,7 @@
   remote_user: vagrant
   tasks:
   - apt: update_cache=yes
-  - apt_repository: repo='deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) main' state=present
-  - apt_repository: repo='deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) universe' state=present
-  # - apt: upgrade=dist update_cache=yes
+  - apt_repository: repo='deb http://archive.ubuntu.com/ubuntu precise main' state=present
+  - apt_repository: repo='deb http://archive.ubuntu.com/ubuntu precise universe' state=present
   - apt: name=imagemagick state=present
   - apt: name=php5-imagick state=present
