@@ -31,9 +31,9 @@ echo "Copying ${images[0]} to $joined"
 cp "$tmp_dir/${images[0]}" $joined
 slice_height=30
 for f in "${images[@]:1}"; do
-	convert "$tmp_dir/$f" -crop x${slice_height}+0+0 "$tmp_dir/slice.png"
-	search="$(compare -metric RMSE -subimage-search $joined "$tmp_dir/slice.png" "$tmp_dir/search.png" 2>&1)"
-	offset=$(echo "$search" | sed 's/.*,//')
-	echo "$f slice found at ${offset}px in $joined ($search)"
-	convert $joined -page +0+$offset "$tmp_dir/$f" -layers mosaic $joined
+  convert "$tmp_dir/$f" -crop x${slice_height}+0+0 "$tmp_dir/slice.png"
+  search="$(compare -metric RMSE -subimage-search $joined "$tmp_dir/slice.png" "$tmp_dir/search.png" 2>&1)"
+  offset=$(echo "$search" | sed 's/.*,//')
+  echo "$f slice found at ${offset}px in $joined ($search)"
+  convert $joined -page +0+$offset "$tmp_dir/$f" -layers mosaic $joined
 done
