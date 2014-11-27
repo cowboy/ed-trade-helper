@@ -2,7 +2,7 @@
 
 # vagrant ssh -c /vagrant/process/process.sh
 
-img_dir=/vagrant/images
+img_dir=/images
 out_dir=/vagrant/output
 tmp_dir=$out_dir/tmp
 proc_file=$out_dir/processed.txt
