@@ -13,6 +13,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   if is_windows
     # Screenshots
     config.vm.synced_folder "#{ENV['HOME']}\\Pictures\\Frontier Developments\\Elite Dangerous", "/images", create: true
+    config.vm.synced_folder "#{ENV['HOME']}\\AppData\\Local\\Frontier_Developments\\Products\\FORC-FDEV-D-1002\\Logs", "/logs", create: true
     # Provisioning configuration for shell script.
     config.vm.provision "shell" do |sh|
       sh.path = "provisioning/windows.sh"
