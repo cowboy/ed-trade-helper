@@ -36,7 +36,7 @@ function mv_prev() { mv "$1" "$(prev "$1")"; }
 # Move file to backup dir, adding file modification date.
 function bak() {
   local file="$(basename "$1")"
-  local timestamp="$(date -u +"%Y-%m-%d %H:%M:%S" -r "$1")"
+  local timestamp="$(date -u +"%Y-%m-%d %H.%M.%S" -r "$1")"
   mv "$1" "$bak_dir/$(suffix " $timestamp" "$file")"
 }
 # Parse system name from E:D logs.
