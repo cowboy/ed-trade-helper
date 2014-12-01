@@ -1,37 +1,163 @@
 #!/bin/bash
 
-# vagrant ssh -c /vagrant/process/process.sh
+# vagrant ssh -c "/vagrant/process/process.sh [-f] [-o]"
 
+ref_dir=/vagrant/reference
 img_dir=/images
 out_dir=/vagrant/output
-tmp_dir=$out_dir/tmp
+bak_dir=$out_dir/backup
+tmp_dir=/tmp/process
 
-processed=$out_dir/tmp/processed.txt
+# Parse CLI options.
+while getopts "fo" opt; do
+  case "$opt" in
+  f) force=1 ;;
+  o) once=1 ;;
+  esac
+done
 
 shopt -s extglob nullglob
 
-# Create output and temp directories if necessary.
+# Create directories if necessary.
 [[ -d "$out_dir" ]] || mkdir -p "$out_dir"
+[[ -d "$bak_dir" ]] || mkdir -p "$bak_dir"
 [[ -d "$tmp_dir" ]] || mkdir -p "$tmp_dir"
 
+# Join array.
+function join { local IFS="$1"; shift; echo "$*"; }
+# Parse number part from Screenshot_0000.bmp.
+function image_num() { echo "$1" | sed -r 's/[^0-9]*([0-9]+).*/\1/'; }
+# Add suffix to filename, before extension.
+function suffix() { echo "$2" | sed -r "s/(\.[^.]+)\$/$1\1/"; }
+# Get filename.prev.ext from filename.ext
+function prev() { suffix .last "$1"; }
+# Move filename.ext to filename.prev.ext
+function mv_prev() { mv "$1" "$(prev "$1")"; }
+# Move file to backup dir, adding file modification date.
+function bak() {
+  local file="$(basename "$1")"
+  local timestamp="$(date -u +"%Y-%m-%d %H:%M:%S" -r "$1")"
+  mv "$1" "$bak_dir/$(suffix " $timestamp" "$file")"
+}
+# Parse system name from E:D logs.
 function system_name() {
   [[ ! -d "/logs" ]] && "NONE" && return 1
   local log="$(ls -t /logs/netLog.*.log | head -1)"
   cat $log | sed -nr 's/.*System:[0-9]+\(([^)]+)\).*/\1/p' | tail -1
 }
+# Prep OCR word replacements.
+ocr_fixes=
+function get_ocr_fixes() {
+  local line parts
+  while read line; do
+    [[ "$line" ]] || continue
+    parts=($line)
+    ocr_fixes="$ocr_fixes;s/\b${parts[0]}\b/${parts[@]:1}/"
+  done <"$ref_dir/ocr_fixes.txt"
+  ocr_fixes="${ocr_fixes#;}"
+}
+# Fix (?) bad OCR.
+function fix_ocr() {
+  echo "$1" | sed -r "$ocr_fixes" | tr -dc "[:alnum:][:blank:]"
+}
+
+#############
+## UNKNOWN ##
+#############
+
+function unknown() { echo "unknown image type, skipping"; }
 
 ############
 ## MARKET ##
 ############
+
+function market() {
+  local k match_threshold result market_match
+  local station_name_parsed station_name_file station_name
+  match_threshold=2000
+  cd "$tmp_dir"
+  convert "$img_dir/$img.bmp" $(
+    for k in "${!market_crops[@]}"; do
+      echo \( +clone -crop ${market_crops[$k]} +repage -write $k.png +delete \)
+    done
+  ) null:
+  # Abort if market_header crop is not actually from a market image.
+  result="$(compare -metric RMSE market_header.png "$ref_dir/market_header.png" null: 2>&1)"
+  if echo "$result" | awk "{exit \$1 < $match_threshold ? 0 : 1}"; then
+    echo "market"
+  else
+    return 1
+  fi
+  # Test if station_name crop matches that of the last market.
+  market_match=
+  if [[ "$(find "$(prev station_name.png)" -mmin -1 2>/dev/null)" ]]; then
+    result="$(compare -metric RMSE station_name.png "$(prev station_name.png)" null: 2>&1)"
+    if echo "$result" | awk "{exit \$1 < $match_threshold ? 0 : 1}"; then
+      echo "- last market match [$result]"
+      market_match=1
+    else
+      echo "- last market nomatch [$result]"
+    fi
+  else
+    echo "- no last market within 1 min"
+  fi
+  # Get station name.
+  if [[ "$market_match" ]]; then
+    station_name="$(cat "$(prev station_name.txt)" 2>/dev/null)"
+    echo "- station name: $station_name"
+  else
+    # Good luck with the OCR.
+    tesseract station_name.png station_name -psm 7 >/dev/null
+    station_name_parsed="$(<station_name.txt)"
+    station_name="$(fix_ocr "$station_name_parsed")"
+    echo "$station_name" > station_name.txt
+    mv_prev station_name.txt
+    echo "- station name: $station_name [$station_name_parsed]"
+  fi
+  [[ ! "$station_name" ]] && echo "- unable to parse station name" && return
+  if [[ "$market_match" ]]; then
+    # Continue existing market image.
+    market_continue "$station_name"
+  else
+    # Start new market image.
+    market_new "$station_name"
+  fi
+  # Make backups of market crops.
+  for k in "${!market_crops[@]}"; do mv_prev $k.png; done
+  echo "- done"
+}
+
+function market_new() {
+  local joined="$out_dir/$1.png"
+  echo "- new station"
+  [[ -e "$joined" ]] && bak "$joined"
+  convert -append station_name.png station_info.png market_header.png market_data.png "$joined"
+}
+
+function market_continue() {
+  local result offset
+  local joined="$out_dir/$1.png"
+  echo "- continue station"
+  result="$(compare -metric RMSE -subimage-search "$joined" market_slice.png null: 2>&1)"
+  offset=$(echo "$result" | sed 's/.*,//')
+  if (( $offset > 0 )); then
+    echo "- slice match at $offset [$result]"
+    convert "$joined" -page +0+$offset market_data.png -layers mosaic "$joined"
+  else
+    echo "- slice nomatch"
+  fi
+}
 
 declare -A market_crops
 function market_crops_init() {
   # Based on 1920x1200
   local x=95 w=1190 k a
   market_crops=(
-    [station_info]="132 98"
+    [station_name]="132 36"
+    [station_info]="168 62"
     [market_header]="230 79"
     [market_data]="310 713"
+    [market_slice]="310 50"
   )
   for k in "${!market_crops[@]}"; do
     a=(${market_crops[$k]})
@@ -40,97 +166,48 @@ function market_crops_init() {
 }
 market_crops_init
 
-function market() {
-  convert "$img_dir/$img.bmp" $(
-    for k in "${!market_crops[@]}"; do
-      echo \( +clone -crop ${market_crops[$k]} +repage -write "$tmp_dir/$k.png" +delete \)
-    done
-  ) null:
-  # TODO: return 1 if market_header is not actually from a market image
-  if market_last >/dev/null; then
-    local match_threshold=2000
-    local result="$(compare -metric RMSE "$tmp_dir/station_info.png" "$tmp_dir/station_info_last.png" null: 2>&1)"
-    if echo "$result" | awk "{exit \$1 < $match_threshold ? 0 : 1}"; then
-      echo "last market match [$result]"
-    else
-      echo "last market NOMATCH [$result]"; false
-    fi
-  else
-    echo "no last market"; false
-  fi
-  if [[ $? == 0 ]]; then
-    market_continue $img
-  else
-    market_new_station $img
-  fi
-}
-
-function market_last() {
-  local file="$tmp_dir/market_last_image.txt"
-  [[ "$1" ]] && echo $1 > "$file" || cat "$file" 2>/dev/null
-}
-
-function market_new_station() {
-  market_last $1
-  local joined="$(market_last).png"
-  echo " - create $joined"
-  convert -append "$tmp_dir/station_info.png" "$tmp_dir/market_header.png" "$tmp_dir/market_data.png" $joined
-  mv "$tmp_dir/station_info.png" "$tmp_dir/station_info_last.png"
-}
-
-function market_continue() {
-  local joined="$(market_last).png"
-  echo " - continue $joined"
-  local slice_height=50
-  local src="$tmp_dir/market_data.png"
-  local slice="$tmp_dir/market_data_slice.png"
-  convert "$src" -crop x${slice_height}+0+0 +repage "$slice"
-  local result="$(compare -metric RMSE -subimage-search $joined "$slice" null: 2>&1)"
-  local offset=$(echo "$result" | sed 's/.*,//')
-  if (( $offset == 0 )); then
-    echo " - slice NOMATCH"
-    return 1
-  else
-    echo " - slice matched at $offset [$result]"
-    convert $joined -page +0+$offset "$src" -layers mosaic $joined
-  fi
-}
-
 ##########
 ## MAIN ##
 ##########
 
 function process() {
-  # Get remaining unprocessed images.
+  local images_new f img
+  # Get new images.
   cd "$img_dir"
-  local images=( !($(cat "$processed" 2>/dev/null | tr "\n" "|")).bmp )
+  images_new=( Screenshot_!($(join \| "${images[@]}")).bmp )
 
-  # images=(
-  #   Screenshot_0000.bmp
-  #   Screenshot_0001.bmp
-  #   Screenshot_0002.bmp
-  #   Screenshot_0003.bmp
-  #   Screenshot_0004.bmp
+  # Abort if no new images found.
+  (( ${#images_new[@]} == 0 )) && return 1
 
-  #   Screenshot_0017.bmp
-  #   Screenshot_0018.bmp
-  #   Screenshot_0019.bmp
-  # )
+  # Per-run initialization.
+  get_ocr_fixes
 
-  (( ${#images[@]} == 0 )) && return 1
-
-  cd "$out_dir"
-  for i in "${!images[@]}"; do
-    local img=$(basename ${images[$i]} .bmp)
+  # Process images.
+  for f in "${images_new[@]}"; do
+    img=$(basename "$f" .bmp)
     echo -n "$img: "
-    market $img
-    echo $img >> "$processed"
+    # Process image.
+    market || \
+    unknown
+    # Store image number to prevent re-processing.
+    images+=($(image_num "$f"))
   done
-  echo "Ready..."
 }
 
-echo "Ready..."
+# Get initial image numbers.
+if [[ "$force" ]]; then
+  images=()
+else
+  cd "$img_dir"
+  images=(Screenshot_*.bmp)
+  for i in "${!images[@]}"; do images[$i]=$(image_num "${images[$i]}"); done
+  echo "Ignoring ${#images[@]} existing image(s)"
+fi
+
+echo "Ready"
+
 while true; do
   process
-  sleep 10
+  [[ "$once" ]] && exit
+  sleep 3
 done

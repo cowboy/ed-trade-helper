@@ -9,3 +9,4 @@
     with_items:
     - imagemagick
     - php5-imagick
+    - tesseract-ocr
