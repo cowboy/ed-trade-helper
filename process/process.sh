@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# vagrant ssh -c /vagrant/process/process.sh
 # vagrant ssh -c "/vagrant/process/process.sh [-f] [-o]"
 
 ref_dir=/vagrant/reference
