@@ -17,7 +17,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     # Provisioning configuration for shell script.
     config.vm.provision "shell" do |sh|
       sh.path = "provisioning/windows.sh"
-      sh.args = "provisioning/playbook.yml"
+      sh.args = "provisioning/playbook.yml provisioning/inventory"
     end
   else
     # Screenshots
@@ -25,6 +25,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     # Provisioning configuration for Ansible (for Mac/Linux hosts).
     config.vm.provision "ansible" do |ansible|
       ansible.playbook = "provisioning/playbook.yml"
+      ansible.inventory_path = "provisioning/inventory"
       ansible.sudo = true
     end
   end
