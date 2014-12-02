@@ -79,11 +79,14 @@ function market() {
   cd "$tmp_dir"
   convert "$img_dir/$img.bmp" $(
     for k in "${!market_crops[@]}"; do
-      echo \( +clone -crop ${market_crops[$k]} +repage -write $k.png +delete \)
+      echo \( +clone -crop ${market_crops[$k]} +repage \
+        -write $k.png \
+        -sigmoidal-contrast 10,40% -type grayscale -write ${k}_ocr.png \
+        +delete \)
     done
   ) null:
   # Abort if market_header crop is not actually from a market image.
-  result="$(compare -metric RMSE market_header.png "$ref_dir/market_header.png" null: 2>&1)"
+  result="$(compare -metric RMSE market_header_ocr.png "$ref_dir/market_header_ocr.png" null: 2>&1)"
   if echo "$result" | awk "{exit \$1 < $match_threshold ? 0 : 1}"; then
     echo "market"
   else
@@ -91,8 +94,8 @@ function market() {
   fi
   # Test if station_name crop matches that of the last market.
   market_match=
-  if [[ "$(find "$(prev station_name.png)" -mmin -1 2>/dev/null)" ]]; then
-    result="$(compare -metric RMSE station_name.png "$(prev station_name.png)" null: 2>&1)"
+  if [[ "$(find "$(prev station_name_ocr.png)" -mmin -1 2>/dev/null)" ]]; then
+    result="$(compare -metric RMSE station_name_ocr.png "$(prev station_name_ocr.png)" null: 2>&1)"
     if echo "$result" | awk "{exit \$1 < $match_threshold ? 0 : 1}"; then
       echo "- last market match [$result]"
       market_match=1
@@ -108,7 +111,7 @@ function market() {
     echo "- station name: $station_name"
   else
     # Good luck with the OCR.
-    tesseract station_name.png station_name -psm 7 >/dev/null
+    tesseract station_name_ocr.png station_name -psm 7 >/dev/null
     station_name_parsed="$(<station_name.txt)"
     station_name="$(fix_ocr "$station_name_parsed")"
     echo "$station_name" > station_name.txt
@@ -124,7 +127,7 @@ function market() {
     market_new "$station_name"
   fi
   # Make backups of market crops.
-  for k in "${!market_crops[@]}"; do mv_prev $k.png; done
+  for k in "${!market_crops[@]}"; do mv_prev $k.png; mv_prev ${k}_ocr.png; done
   echo "- done"
 }
 
