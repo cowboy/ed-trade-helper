@@ -69,21 +69,10 @@ function get_system_name() {
   cat $log | sed -nr 's/.*System:[0-9]+\(([^)]+)\).*/\1/p' | tail -1
 }
 
-# Prep OCR word replacements.
-ocr_fixes=
-function get_ocr_fixes() {
-  local line parts
-  while read line; do
-    [[ "$line" ]] || continue
-    IFS="=" read -a parts <<< "$line"
-    ocr_fixes="$ocr_fixes;s/\b${parts[0]}\b/${parts[@]:1}/"
-  done <"$ref_dir/ocr_fixes.txt"
-  ocr_fixes="${ocr_fixes#;}"
-}
-# Fix (?) bad OCR.
-function fix_ocr() {
+# Adjust OCR text.
+function adjust_ocr() {
   local initial_caps='s/(.*)/\L\1/;s/\b(.)/\U\1/g'
-  echo "$1" | sed -r "$ocr_fixes;$initial_caps" | tr -dc "[:alnum:][:blank:]"
+  echo "$1" | sed -r "$initial_caps"
 }
 
 #############
@@ -152,54 +141,67 @@ function market_is_market() {
   below_threshold 6000 "$result"
 }
 
-# Good luck with the OCR.
-function market_ocr_station_name() {
-  local ocr ocr_fixed
-  if [[ ! -e "$station_name_txt_file" ]]; then
-    tesseract "$station_name_ocr_file" "$tmp_dir/station_name" -l small -psm 7 >/dev/null
-    ocr="$(<"$station_name_txt_file")"
-    # Attempt to fix OCR issues.
-    ocr_fixed="$(fix_ocr "$ocr")"
-    echo "- station name: $ocr_fixed [$ocr]" 1>&2
-    echo "$ocr_fixed">"$station_name_txt_file"
-  fi
-  echo "$(<"$station_name_txt_file")"
+# Get market name (system + station).
+function get_market_name() {
+  local match_string system_name market_name ocr ocr_fixed closest_match
+  if [[ ! -e "$market_name_txt_file" ]]; then
+    echo " Get market name"
+    # Get system name.
+    system_name="$(get_system_name)"
+    if [[ "$system_name" && ! "$force" ]]; then
+      match_string="$system_name "
+    else
+      system_name="UNKNOWN"
+    fi
+    echo -n "  System name: $system_name; "
+    # Get station name, good luck with the OCR.
+    tesseract "$station_name_ocr_file" "$tmp_dir/station_name_ocr" -l small -psm 7 >/dev/null
+    ocr="$(<"$tmp_dir/station_name_ocr.txt")"
+    ocr_fixed="$(adjust_ocr "$ocr")"
+    echo -n "Station name: $ocr_fixed [$ocr]; "
+    # Find closest match, if one exists.
+    cd "$out_dir"
+    ls *.png | sed 's/.png$//' > "$tmp_dir/outfiles.txt"
+    match_string="${match_string}- $ocr_fixed"
+    closest_match="$(agrep -By -e "${match_string:0:29}" "$tmp_dir/outfiles.txt" 2>/dev/null | head -1)"
+    if [[ "$closest_match" ]]; then
+      market_name="$closest_match"
+      echo "Matched existing"
+    else
+      market_name="$system_name - $ocr_fixed"
+      echo "No match"
+    fi
+    echo "  Market name: $market_name"
+    echo "$market_name" > "$market_name_txt_file"
+  fi 1>&2
+  echo "$(<"$market_name_txt_file")"
 }
 
-# Test if station_name crop matches that of the last market.
-function market_is_new() {
-  local station_name_prev
-  if [[ "$(find "$station_name_txt_prev" -mmin -1 2>/dev/null)" ]]; then
-    station_name_prev="$(<"$station_name_txt_prev")"
-    if [[ "$(market_ocr_station_name)" == "$station_name_prev" ]]; then
-      echo "- last market match"
-      return 1
+# Is this a continuation of the last market?
+function market_is_continuation() {
+  local market_name market_name_prev
+  market_name="$(get_market_name)"
+  echo -n " Continuation? "
+  if [[ "$(find "$market_name_txt_prev" -mmin -1 2>/dev/null)" ]]; then
+    market_name_prev="$(<"$market_name_txt_prev")"
+    if [[ "$market_name" == "$market_name_prev" ]]; then
+      echo "Yes [last market match]"
     else
-      echo "- last market nomatch [$station_name_prev]"
+      echo "No [last market nomatch: $market_name_prev]"
+      return 1
     fi
   else
-    echo "- no last market within 1 min"
+    echo "No [timeout]"
+    return 1
   fi
 }
 
 # Create new market image.
 function market_create() {
-  local system_name market_name station_name
   local market_img
   # Start new market.
-  echo "- new market"
-  # Get system name if possible.
-  system_name="$(get_system_name)"
-  if [[ "$system_name" && ! "$force" ]]; then
-    echo "- system name: $system_name"
-    market_name="$system_name - "
-  fi
-  station_name="$(market_ocr_station_name)"
-  # Generate and store market name.
-  market_name="$market_name$station_name"
-  echo "$market_name" > "$market_name_txt_prev"
-  # Generate market image.
-  market_img="$out_dir/$market_name.png"
+  market_img="$out_dir/$(get_market_name).png"
+  echo " NEW MARKET"
   # Backup any existing market image.
   [[ -e "$market_img" ]] && bak "$market_img"
   convert -append "$station_name_file" "$station_info_file" "$market_header_file" "$market_data_file" "$market_img"
@@ -207,52 +209,47 @@ function market_create() {
 
 # Create existing market image.
 function market_continue() {
-  local market_name
   local market_img result offset
-  echo "- continue market"
-  # Get previous market name.
-  market_name="$(<"$market_name_txt_prev")"
-  echo "- market name: $market_name"
-  # Generate market image.
-  market_img="$out_dir/$market_name.png"
+  market_img="$out_dir/$(get_market_name).png"
   # Detect vertical offset of slice in existing market image.
   result="$(compare -metric RMSE -subimage-search "$market_img" $market_slice_file null: 2>&1)"
   offset=$(echo "$result" | sed 's/.*,//')
+  echo -n " Slice match? "
   if (( $offset > 0 )); then
-    echo "- slice match at $offset [$result]"
+    echo "Yes @ $offset [$result]"
+    echo " CONTINUE MARKET"
     convert "$market_img" -page +0+$offset "$market_data_file" -layers mosaic "$market_img"
   else
-    echo "- slice nomatch, aborting"
+    echo "No"
+    echo " CANNOT CONTINUE MARKET"
   fi
 }
 
 # Make backups of market crops.
 function market_backup_files() {
-  local k img1 img2
-  for k in "${!market_crops[@]}"; do
-    eval "img1=\$${k}_file"; eval "img2=\$${k}_ocr_file"
-    mv_prev "$img1"
-    mv_prev "$img2"
+  local k f
+  for k in "${!files[@]}"; do
+    eval "f=\$${k}_file"
+    mv_prev "$f"
   done
-  mv_prev "$station_name_txt_file"
 }
 
 # Do all the things!
 function market() {
   market_crops_init "$img" || return 1
   # Initialize file-named variables
-  local k; declare -A file
-  for k in "${!market_crops[@]}"; do file[$k]="$k.png"; file[${k}_ocr]="${k}_ocr.png"; done
-  for k in station_name market_name; do file[${k}_txt]="$k.txt"; done
-  for k in "${!file[@]}"; do
-    declare ${k}_file="$tmp_dir/${file[$k]}" ${k}_prev="$(prev "$tmp_dir/${file[$k]}")"
+  local k; declare -A files
+  for k in "${!market_crops[@]}"; do files[$k]="$k.png"; files[${k}_ocr]="${k}_ocr.png"; done
+  for k in market_name; do files[${k}_txt]="$k.txt"; done
+  for k in "${!files[@]}"; do
+    declare ${k}_file="$tmp_dir/${files[$k]}" ${k}_prev="$(prev "$tmp_dir/${files[$k]}")"
   done
   market_generate_crops "$img"
   market_is_market || return 1
   echo "market"
-  market_is_new && market_create || market_continue
+  market_is_continuation && market_continue || market_create
   market_backup_files
-  echo "- done"
+  echo
 }
 
 ##########
