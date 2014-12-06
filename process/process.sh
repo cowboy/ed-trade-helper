@@ -265,9 +265,6 @@ function process() {
   # Abort if no new images found.
   (( ${#images_new[@]} == 0 )) && return 1
 
-  # Per-run initialization.
-  get_ocr_fixes
-
   # Process images.
   for f in "${images_new[@]}"; do
     img=$(basename "$f" .bmp)
