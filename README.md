@@ -4,8 +4,8 @@ Watch screenshots directory for Commodities Market images, stitching together sa
 
 ## Future goals
 
-* Support other screen resolutions than 1900x1200 (patches welcome!)
-* Make OCR work?
+* Support other screen resolutions than 3440x1440 and 1900x1200 (patches welcome!)
+* Make OCR actually work?
 
 ## Dependencies
 
@@ -32,12 +32,16 @@ Watch screenshots directory for Commodities Market images, stitching together sa
 
 ## Usage
 
-Start the script with `vagrant ssh -c /vagrant/process/process.sh`. Specify options like `vagrant ssh -c "/vagrant/process/process.sh -option"`.
+Either:
+
+* Create a Windows Shortcut with the target `powershell -noexit -executionpolicy bypass "& "C:\path\to\ed-trade-helper\start-process.ps1"` and run it.
+* Open up a Git Shell and run `vagrant ssh -c /vagrant/process/process.sh`. Specify options like `vagrant ssh -c "/vagrant/process/process.sh -option"`.
 
 * Pre-existing screenshots are ignored unless the `-f` option is used.
 * The script will wait in a loop for new images to be added unless the `-o` option is used.
 * New screenshots will be processed, in-order.
 * Stitched images will be saved in the `output` subdirectory of the cloned repository.
+
 
 ## Commodities Market Screenshot Instructions
 
@@ -46,4 +50,4 @@ Start the script with `vagrant ssh -c /vagrant/process/process.sh`. Specify opti
 * The first screenshot should be taken while the market is scrolled all the way to the top.
 * Subsequent screenshots should be scrolled down no more than 4 ticks on the mousewheel. If there is no overlap between screenshots, stitching will fail.
 * After 1 minute, the last market screenshot is invalidated, so don't take longer than 1 minute between screenshots for the same market.
-* If the OCR incorrectly matches the station name, add a correction in the format `BADWORD GOODWORD` to the [reference/ocr_fixes.txt](reference/ocr_fixes.txt) (ensure the file has a trailing newline) file and try again.
+* If the OCR incorrectly detects the station name, wait until all related screenshots have been processed, and then edit the name of the generated image to be "System Name - Station Name.png". The matching algorithm should correct the OCR for subsequent screenshots for the same station.
