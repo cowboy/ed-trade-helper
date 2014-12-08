@@ -53,9 +53,8 @@ function bak() {
 }
 
 # Do math stuff.
-function math() {
-  echo "$@" | bc -l
-}
+function math() { echo "$@" | bc -l; }
+function math_int() { echo "$@" | bc; }
 
 # Test that a number ($2) is less than another number ($1)
 function below_threshold() {
@@ -87,7 +86,7 @@ function unknown() { echo "unknown image type, skipping"; }
 
 # Generate market crop geometries.
 rm "$tmp_dir"/* 2>/dev/null
-declare -A market_crops
+declare -A market_crops_dims market_crops
 function market_crops_init() {
   local market_x market_w start_y market_h yy hh
   local k a
@@ -100,21 +99,22 @@ function market_crops_init() {
     echo "unknown dimensions"
     return 1
   fi
+  market_crops_dims=()
+  market_h=$(math_int $market_w / 1.33)
+  # market_crops_dims[full]="$start_y $market_h"
+  yy=$start_y; hh=$(math_int $market_h / 24.4)
+  market_crops_dims[station_name]="$yy $hh"
+  yy=$(math_int $yy + $hh); hh=$(math_int $market_h / 14.9)
+  market_crops_dims[station_info]="$yy $hh"
+  yy=$(math_int $yy + $hh); hh=$(math_int $market_h / 11)
+  market_crops_dims[market_header]="$yy $hh"
+  yy=$(math_int $yy + $hh); hh=$(math_int $market_h / 1.25)
+  market_crops_dims[market_data]="$yy $hh"
+  hh=$(math_int $hh / 10)
+  market_crops_dims[market_slice]="$yy $hh"
   market_crops=()
-  market_h=$(math $market_w / 1.33)
-  # market_crops[full]="$start_y $market_h"
-  yy=$start_y; hh=$(math $market_h / 24.4)
-  market_crops[station_name]="$yy $hh"
-  yy=$(math $yy + $hh); hh=$(math $market_h / 14.9)
-  market_crops[station_info]="$yy $hh"
-  yy=$(math $yy + $hh); hh=$(math $market_h / 11)
-  market_crops[market_header]="$yy $hh"
-  yy=$(math $yy + $hh); hh=$(math $market_h / 1.25)
-  market_crops[market_data]="$yy $hh"
-  hh=$(math $hh / 10)
-  market_crops[market_slice]="$yy $hh"
-  for k in "${!market_crops[@]}"; do
-    a=(${market_crops[$k]})
+  for k in "${!market_crops_dims[@]}"; do
+    a=(${market_crops_dims[$k]})
     market_crops[$k]=${market_w}x${a[1]}+${market_x}+${a[0]}
   done
 }
@@ -138,7 +138,12 @@ function market_is_market() {
   local resized="$tmp_dir/market_header_resized.png"
   convert "$market_header_ocr_file" -resize 1585x108 "$resized"
   local result="$(compare -metric RMSE "$resized" "$ref_dir/market_header_ocr.png" null: 2>&1)"
-  below_threshold 6000 "$result"
+  below_threshold 10000 "$result"
+}
+
+# Get closest match of string $1 against file $2.
+function get_closest_match() {
+  agrep -By -e "${1:0:29}" "$2" 2>/dev/null | head -1
 }
 
 # Get market name (system + station).
@@ -162,8 +167,7 @@ function get_market_name() {
     # Find closest match, if one exists.
     cd "$out_dir"
     ls *.png | sed 's/.png$//' > "$tmp_dir/outfiles.txt"
-    match_string="${match_string}- $ocr_fixed"
-    closest_match="$(agrep -By -e "${match_string:0:29}" "$tmp_dir/outfiles.txt" 2>/dev/null | head -1)"
+    closest_match="$(get_closest_match "${match_string}- $ocr_fixed" "$tmp_dir/outfiles.txt")"
     if [[ "$closest_match" ]]; then
       market_name="$closest_match"
       echo "Matched existing"
@@ -198,25 +202,36 @@ function market_is_continuation() {
 
 # Create new market image.
 function market_create() {
-  local market_img
+  local market_img height dims
   # Start new market.
   market_img="$out_dir/$(get_market_name).png"
   echo " NEW MARKET"
   # Backup any existing market image.
   [[ -e "$market_img" ]] && bak "$market_img"
+  # Initialize slice offset.
+  height=0
+  for k in station_name station_info market_header; do
+    dims=(${market_crops_dims[$k]})
+    height=$(($height + ${dims[1]}))
+  done
+  echo $height > "$offset_txt_file"
+  # Generate market image.
   convert -append "$station_name_file" "$station_info_file" "$market_header_file" "$market_data_file" "$market_img"
 }
 
 # Create existing market image.
 function market_continue() {
-  local market_img result offset
+  local market_img result slice_offset prev_offset offset
   market_img="$out_dir/$(get_market_name).png"
-  # Detect vertical offset of slice in existing market image.
-  result="$(compare -metric RMSE -subimage-search "$market_img" $market_slice_file null: 2>&1)"
-  offset=$(echo "$result" | sed 's/.*,//')
+  # Detect vertical offset of slice in previous market image.
+  result="$(compare -metric RMSE -subimage-search "$market_data_prev" "$market_slice_file" null: 2>&1)"
+  slice_offset=$(echo "$result" | sed 's/.*,//')
   echo -n " Slice match? "
-  if (( $offset > 0 )); then
-    echo "Yes @ $offset [$result]"
+  if (( $slice_offset > 0 )); then
+    prev_offset=$(<"$offset_txt_prev")
+    offset=$(($prev_offset + $slice_offset))
+    echo $offset > "$offset_txt_file"
+    echo "Yes [$slice_offset -> $offset]"
     echo " CONTINUE MARKET"
     convert "$market_img" -page +0+$offset "$market_data_file" -layers mosaic "$market_img"
   else
@@ -240,7 +255,7 @@ function market() {
   # Initialize file-named variables
   local k; declare -A files
   for k in "${!market_crops[@]}"; do files[$k]="$k.png"; files[${k}_ocr]="${k}_ocr.png"; done
-  for k in market_name; do files[${k}_txt]="$k.txt"; done
+  for k in market_name offset; do files[${k}_txt]="$k.txt"; done
   for k in "${!files[@]}"; do
     declare ${k}_file="$tmp_dir/${files[$k]}" ${k}_prev="$(prev "$tmp_dir/${files[$k]}")"
   done
