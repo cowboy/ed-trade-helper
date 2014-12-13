@@ -70,7 +70,7 @@ function get_system_name() {
 
 # Adjust OCR text.
 function adjust_ocr() {
-  local initial_caps='s/(.*)/\L\1/;s/\b(.)/\U\1/g'
+  local initial_caps='s/[^A-Z0-9 ]//g;s/(.*)/\L\1/;s/\b(.)/\U\1/g'
   echo "$1" | sed -r "$initial_caps"
 }
 
@@ -93,6 +93,8 @@ function market_crops_init() {
   local w=${dims[0]} h=${dims[1]}
   if [[ "${w}x${h}" == "1920x1200" ]]; then
     market_x=95; market_w=1190; start_y=132
+  elif [[ "${w}x${h}" == "1920x1080" ]]; then
+    market_x=135; market_w=1130; start_y=97
   elif [[ "${w}x${h}" == "3440x1440" ]]; then
     market_x=567; market_w=1585; start_y=97
   else
@@ -143,7 +145,7 @@ function market_is_market() {
 
 # Get closest match of string $1 against file $2.
 function get_closest_match() {
-  agrep -By -e "${1:0:29}" "$2" 2>/dev/null | head -1
+  agrep -By -i -e "${1:0:29}" "$2" 2>/dev/null | head -1
 }
 
 # Get market name (system + station).
