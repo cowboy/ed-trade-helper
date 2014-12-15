@@ -61,13 +61,6 @@ function below_threshold() {
   echo "$2" | awk "{exit \$1 < $1 ? 0 : 1}"
 }
 
-# Parse system name from E:D logs.
-function get_system_name() {
-  [[ ! -d "/logs" ]] && return 1
-  local log="$(ls -t /logs/netLog.*.log | head -1)"
-  cat $log | sed -nr 's/.*System:[0-9]+\(([^)]+)\).*/\1/p' | tail -1
-}
-
 # Adjust OCR text.
 function adjust_ocr() {
   local initial_caps='s/(.*)/\L\1/;s/\b(.)/\U\1/g'
@@ -143,22 +136,17 @@ function market_is_market() {
 
 # Get closest match of string $1 against file $2.
 function get_closest_match() {
-  agrep -By -e "${1:0:29}" "$2" 2>/dev/null | head -1
+  # Best-match: -By
+  # Tolerate N errors (max 8): -N
+  local pattern="$(echo -n "$1" | tail -c 28)\$"
+  agrep -5 -e "$pattern" "$2" 2>/dev/null | head -1
 }
 
 # Get market name (system + station).
 function get_market_name() {
-  local match_string system_name market_name ocr ocr_fixed closest_match
+  local match_string market_name ocr ocr_fixed closest_match
   if [[ ! -e "$market_name_txt_file" ]]; then
     echo " Get market name"
-    # Get system name.
-    system_name="$(get_system_name)"
-    if [[ "$system_name" && ! "$force" ]]; then
-      match_string="$system_name "
-    else
-      system_name="UNKNOWN"
-    fi
-    echo -n "  System name: $system_name; "
     # Get station name, good luck with the OCR.
     tesseract "$station_name_ocr_file" "$tmp_dir/station_name_ocr" -l small -psm 7 >/dev/null
     ocr="$(<"$tmp_dir/station_name_ocr.txt")"
@@ -167,12 +155,12 @@ function get_market_name() {
     # Find closest match, if one exists.
     cd "$out_dir"
     ls *.png | sed 's/.png$//' > "$tmp_dir/outfiles.txt"
-    closest_match="$(get_closest_match "${match_string}- $ocr_fixed" "$tmp_dir/outfiles.txt")"
+    closest_match="$(get_closest_match "$ocr_fixed" "$tmp_dir/outfiles.txt")"
     if [[ "$closest_match" ]]; then
       market_name="$closest_match"
       echo "Matched existing"
     else
-      market_name="$system_name - $ocr_fixed"
+      market_name="$ocr_fixed"
       echo "No match"
     fi
     echo "  Market name: $market_name"
