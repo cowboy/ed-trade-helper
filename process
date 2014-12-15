@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# vagrant ssh -c /vagrant/process/process.sh
-# vagrant ssh -c "/vagrant/process/process.sh [-f] [-o]"
+# vagrant exec process [options]
 
 ref_dir=/vagrant/reference
 img_dir=/images

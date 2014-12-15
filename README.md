@@ -12,6 +12,7 @@ Watch screenshots directory for Commodities Market images, stitching together sa
 * [Elite: Dangerous](http://www.elitedangerous.com/) (duh)
 * [VirtualBox](https://www.virtualbox.org/wiki/Downloads)
 * [Vagrant](https://www.vagrantup.com/downloads)
+* [vagrant-exec](https://github.com/p0deje/vagrant-exec)
 * [GitHub Windows](https://windows.github.com/) or [Git](http://msysgit.github.io/)
 * If you plan on editing files, an editor that supports Unix line endings (lf)
 
@@ -35,7 +36,7 @@ Watch screenshots directory for Commodities Market images, stitching together sa
 Either:
 
 * Create a Windows Shortcut with the target `powershell -noexit -executionpolicy bypass "& "C:\path\to\ed-trade-helper\start-process.ps1"` and run it.
-* Open up a Git Shell and run `vagrant ssh -c /vagrant/process/process.sh`. Specify options like `vagrant ssh -c "/vagrant/process/process.sh -option"`.
+* Open up a Git Shell and run `vagrant exec process [options]`
 
 * Pre-existing screenshots are ignored unless the `-f` option is used.
 * The script will wait in a loop for new images to be added unless the `-o` option is used.

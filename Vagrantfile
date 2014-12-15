@@ -7,6 +7,9 @@ VAGRANTFILE_API_VERSION = "2"
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.box = "hashicorp/precise64"
 
+  # vagrant exec commands
+  config.exec.commands 'process', prepend: 'source'
+
   # From https://github.com/geerlingguy/JJG-Ansible-Windows
   require 'rbconfig'
   is_windows = (RbConfig::CONFIG['host_os'] =~ /mswin|mingw|cygwin/)
