@@ -133,12 +133,25 @@ function market_is_market() {
   below_threshold 10000 "$result"
 }
 
-# Get closest match of string $1 against file $2.
+# Attempt to match passed station name $1 in existing images.
 function get_closest_match() {
-  # Best-match: -By
-  # Tolerate N errors (max 8): -N
-  local pattern="$(echo -n "$1" | tail -c 28)\$"
-  agrep -5 -e "$pattern" "$2" 2>/dev/null | head -1
+  local market station match
+  declare -A map
+  rm "$tmp_dir/outfiles.txt" 2>/dev/null
+  cd "$out_dir"
+  for f in *.png; do
+    market="$(echo "$f" | sed -r 's/(.*)\.png/\1/')"
+    station="$(echo "$market" | sed -r 's/.*\((.*)\)/\1/')"
+    map[$station]="$market"
+    echo "$station" >> "$tmp_dir/outfiles.txt"
+  done
+  match="$(tre-agrep -3 -i -e "^${1}\$" "$tmp_dir/outfiles.txt" | head -1)"
+  for k in "${!map[@]}"; do
+    if [[ "$k" == "$match" ]]; then
+      echo "${map[$k]}"
+      return
+    fi
+  done
 }
 
 # Get market name (system + station).
@@ -150,19 +163,17 @@ function get_market_name() {
     tesseract "$station_name_ocr_file" "$tmp_dir/station_name_ocr" -l small -psm 7 >/dev/null
     ocr="$(<"$tmp_dir/station_name_ocr.txt")"
     ocr_fixed="$(adjust_ocr "$ocr")"
-    echo -n "Station name: $ocr_fixed [$ocr]; "
+    echo -n " Station name: $ocr_fixed [$ocr]; "
     # Find closest match, if one exists.
-    cd "$out_dir"
-    ls *.png | sed 's/.png$//' > "$tmp_dir/outfiles.txt"
-    closest_match="$(get_closest_match "$ocr_fixed" "$tmp_dir/outfiles.txt")"
+    closest_match="$(get_closest_match "$ocr_fixed")"
     if [[ "$closest_match" ]]; then
       market_name="$closest_match"
       echo "Matched existing"
     else
-      market_name="$ocr_fixed"
+      market_name="UNKNOWN (${ocr_fixed})"
       echo "No match"
     fi
-    echo "  Market name: $market_name"
+    echo " Market name: $market_name"
     echo "$market_name" > "$market_name_txt_file"
   fi 1>&2
   echo "$(<"$market_name_txt_file")"
